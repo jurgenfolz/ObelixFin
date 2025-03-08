@@ -2,7 +2,8 @@
 
 ObelixTrade is a Python crypto trading bot created for backtesting, plotting, live trading and hopefully making me some money to buy beer. I coded it with a object-oriented structure to help me test strategies and eventually trade on exchanges like Binance.
 
-If you are wondering why the name "Obelix Trade", Obelix is the name of my huge orange cat, and he is adorable.
+If you are wondering why the name "Obelix Trade", Obelix is the name of my huge orange cat, and he is adorable:
+![alt text](obelixo.jpg)
 
 ## Features
 
