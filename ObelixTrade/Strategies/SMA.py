@@ -1,13 +1,6 @@
 import pandas as pd
-from .indicators import SMA
-
-class BaseStrategy:
-    """Abstract base class for all trading strategies."""
-    def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Must return a DataFrame with a 'signal' column (e.g. 'buy', 'sell', or None).
-        """
-        raise NotImplementedError("This method must be overridden by subclasses.")
+from ..indicators import SMA
+from .BaseStrategy import BaseStrategy
 
 class SMACrossoverStrategy(BaseStrategy):
     """Simple Moving Average Crossover Strategy.

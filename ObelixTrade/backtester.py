@@ -33,6 +33,7 @@ class Backtester:
                     btc_held = balance_after_fee / price
                     balance = 0
                     last_signal = 'buy'
+           
             elif signal == 'sell' and last_signal != 'sell':
                 # Sell all BTC
                 if btc_held > 0:
