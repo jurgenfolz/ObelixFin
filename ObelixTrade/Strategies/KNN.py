@@ -6,21 +6,21 @@ from .BaseStrategy import BaseStrategy
 
 class KNNStrategy(BaseStrategy):
     """
-    KNNStrategy uses a K-Nearest Neighbors classifier to predict whether the price will move up or down.
+    KNNStrategy uses a K-Nearest Neighbors classifier to predict whether the price will move up, down, or stay flat.
     
-    It computes technical indicators (SMA_short and SMA_long) as features and then defines the target
-    variable (label) as:
+    It computes technical indicators (SMA_short and SMA_long) as features and defines the target variable based on the future return
+    calculated after a specified number of periods (future_shift).
     
-    - 'buy' (encoded as 1) if the next period's return is positive.
-    - 'sell' (encoded as 0) if the next period's return is non-positive.
-    
-    The classifier is trained on these features, and then it predicts signals for the data.
+    We then post-process the predictions to ensure that consecutive "sell" signals
+    (separated only by "hold") do not occur.
     """
 
-    def __init__(self, short_window=20, long_window=50, n_neighbors=5):
+    def __init__(self, short_window=20, long_window=50, n_neighbors=5, future_shift=1, return_threshold=100):
         self.short_sma = SMA(short_window)
         self.long_sma = SMA(long_window)
         self.n_neighbors = n_neighbors
+        self.future_shift = future_shift
+        self.return_threshold = return_threshold  # Threshold for decision-making
         self.model = KNeighborsClassifier(n_neighbors=self.n_neighbors)
 
     def generate_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -40,13 +40,19 @@ class KNNStrategy(BaseStrategy):
 
     def generate_labels(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Creates a label based on the next period's return:
-          - Label as 1 ("buy") if the return is positive.
-          - Label as 0 ("sell") if the return is negative or zero.
+        Creates a label based on the future return calculated by shifting the close price by future_shift:
+          - Label as 1 ("buy") if the future return is above return_threshold.
+          - Label as -1 ("sell") if the future return is below -return_threshold.
+          - Label as 0 ("hold") if the future return is between -return_threshold and return_threshold.
         """
         df = df.copy()
-        df['future_return'] = df['close'].shift(-1) - df['close']
-        df['label'] = np.where(df['future_return'] > 0, 1, 0)
+        df['future_return'] = df['close'].shift(-self.future_shift) - df['close']
+
+        # Three-class labeling (buy=1, sell=-1, hold=0)
+        df['label'] = np.where(
+            df['future_return'] > self.return_threshold, 1,
+            np.where(df['future_return'] < -self.return_threshold, -1, 0)
+        )
         df.dropna(inplace=True)
         return df
 
@@ -55,26 +61,47 @@ class KNNStrategy(BaseStrategy):
         Generates signals using the KNN classifier:
           1. Computes features and labels.
           2. Trains the classifier on the features.
-          3. Predicts the signal and converts it to 'buy' or 'sell'.
-          
-        Note: This example uses the entire dataset for training and prediction.
-        In a real scenario, you might want to use a walk-forward method or separate training and testing sets.
+          3. Predicts the signal and converts numerical predictions to 'buy', 'sell', or 'hold'.
+          4. Enforces the rule that you cannot have consecutive sells separated only by holds.
         """
-        # Compute features and labels
+        # 1) Compute features and labels
         df_features = self.generate_features(df)
         df_labeled = self.generate_labels(df_features)
-        
+
         feature_cols = ['SMA_diff', 'momentum']
         X = df_labeled[feature_cols]
         y = df_labeled['label']
 
-        # Train the KNN classifier
+        # 2) Train the KNN classifier
         self.model.fit(X, y)
-        # Predict signals on the same data
+
+        # 3) Predict signals on the same data
         df_labeled['prediction'] = self.model.predict(X)
-        # Convert numerical predictions to signals
-        df_labeled['signal'] = df_labeled['prediction'].apply(lambda x: 'buy' if x == 1 else 'sell')
+
+        # 4) Map numerical predictions to 'buy', 'sell', or 'hold'
+        df_labeled['signal'] = df_labeled['prediction'].map({1: 'buy', -1: 'sell', 0: 'hold'})
+
+        # 5) Post-process signals to avoid consecutive sells separated only by holds
+        signals_cleaned = []
+        last_non_hold_signal = None
+
+        for signal in df_labeled['signal']:
+            if signal == 'sell':
+                # If our last non-hold was also 'sell', turn this 'sell' into a 'hold'.
+                if last_non_hold_signal == 'sell':
+                    signals_cleaned.append('hold')
+                else:
+                    signals_cleaned.append('sell')
+                    last_non_hold_signal = 'sell'
+            elif signal == 'buy':
+                signals_cleaned.append('buy')
+                last_non_hold_signal = 'buy'
+            else:  # signal == 'hold'
+                signals_cleaned.append('hold')
+                # We do NOT update last_non_hold_signal when we see 'hold'
         
+        df_labeled['signal'] = signals_cleaned
+
         # Optionally, drop auxiliary columns before returning
         df_labeled.drop(columns=['future_return', 'label', 'prediction'], inplace=True)
         return df_labeled
